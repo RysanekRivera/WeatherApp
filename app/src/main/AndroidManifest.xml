@@ -17,6 +17,7 @@
         android:theme="@style/Theme.WeatherApp">
         <activity
             android:name=".presentation.activities.MainActivity"
+            android:configChanges="orientation|screenSize|keyboard"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

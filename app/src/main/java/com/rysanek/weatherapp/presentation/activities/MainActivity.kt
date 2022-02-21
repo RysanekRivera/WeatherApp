@@ -1,44 +1,55 @@
 package com.rysanek.weatherapp.presentation.activities
 
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Bundle
-import android.provider.Settings
 import android.util.Log
 import androidx.activity.viewModels
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import com.google.android.libraries.places.api.net.PlacesClient
-import com.rysanek.weatherapp.BuildConfig.PLACES_API_KEY
-import com.rysanek.weatherapp.R
+import androidx.lifecycle.lifecycleScope
 import com.rysanek.weatherapp.data.repositories.WeatherRepositoryImpl
-import com.rysanek.weatherapp.domain.location.PlacesApi
-import com.rysanek.weatherapp.presentation.WeatherViewModel
+import com.rysanek.weatherapp.databinding.ActivityMainBinding
+import com.rysanek.weatherapp.domain.permissions.handlePermissionDenials
+import com.rysanek.weatherapp.domain.permissions.isLocationPermissionGranted
+import com.rysanek.weatherapp.presentation.viewmodels.WeatherViewModel
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
-    private val placesApi = PlacesApi()
-    private lateinit var placesClient: PlacesClient
     @Inject lateinit var repository: WeatherRepositoryImpl
+    private var _binding: ActivityMainBinding? = null
+    private val binding get() = _binding!!
     private val viewModel: WeatherViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        placesClient = placesApi(application, PLACES_API_KEY)
+        _binding = ActivityMainBinding.inflate(layoutInflater)
 
-        placesApi.checkLocationPermissions(this, placesClient)
-
-        viewModel.fetchCurrentWeatherData(placesApi.lat ?: 40.76347252582717.toFloat(), placesApi.long ?: (-73.98628004944972).toFloat())
+        if (!isLocationPermissionGranted())
+            requestPermissions(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION), 100)
 
         viewModel.weatherData.observe(this) {
             Log.d("MainActivity", "data: $it")
+            binding.tvWeather.text = it.toString()
         }
 
-        setContentView(R.layout.activity_main)
+        viewModel.latLong.observe(this) { locationState ->
+            Log.d("MainActivity", "location state: $locationState")
+            viewModel.handleLocationState(locationState)
+        }
+
+        setContentView(binding.root)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.checkLocationPermission(isLocationPermissionGranted())
+
+        viewModel.isLocationPermissionGranted.observe(this){ isGranted ->
+            if (isGranted) lifecycleScope.launchWhenResumed {
+                viewModel.requestCurrentLocationLatLong()
+            }
+        }
     }
 
     override fun onRequestPermissionsResult(
@@ -47,54 +58,14 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        if (permissions.isNotEmpty())
         handlePermissionDenials(requestCode, permissions, grantResults)
     }
 
-    private fun handlePermissionDenials(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        if (requestCode == 100 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            //NO-OP
-        } else {
-            if (permissions.isNotEmpty())
-                permissions.forEach { permission ->
-                    showRationaleIfNeeded(permission, requestCode)
-                }
-        }
-    }
-
-    private fun showRationaleIfNeeded(permission: String, requestCode: Int) {
-        if (shouldShowRequestPermissionRationale(permission)) {
-            AlertDialog.Builder(this)
-                .setTitle("$permission Needed")
-                .setMessage("Accept $permission Permission")
-                .setPositiveButton("Accept") { _, _ ->
-                    requestPermissions(arrayOf(permission), requestCode)
-                }
-                .setNegativeButton("Cancel") { _, _ -> }
-                .create()
-                .show()
-        } else {
-            AlertDialog.Builder(this)
-                .setTitle("Permission Needed")
-                .setMessage("Permissions are needed for proper functionality of the app.")
-                .setPositiveButton("Settings") { _, _ ->
-                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                        addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
-                        addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
-                        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                        data = Uri.fromParts("package", packageName, null)
-                        startActivity(this)
-                    }
-                }
-                .setNegativeButton("Cancel") { _, _ -> }
-                .create()
-                .show()
-        }
+    override fun onDestroy() {
+        super.onDestroy()
+        _binding = null
     }
 }
 
